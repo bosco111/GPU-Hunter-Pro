@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # 常量 & 全局配置
 # ============================================================
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 # ============================================================
 # ANSI 颜色系统
@@ -325,13 +325,14 @@ class Config:
         self.vast_key: str = ""
         self.clore_key: str = ""
 
-        # 价格区间 (美元/小时/每张卡) — 每个 GPU 型号一个 (最低价, 最高价)
-        # 例: {"rtx 4090": (0.20, 0.50), "h100": (1.00, 2.50)}
+        # 价格区间 (美元/小时/每张卡) — 按平台分组
+        # 结构: {"runpod": {"rtx 4090": (0.20, 0.50), "h100": (1.00, 2.50)}, "vast": {...}}
         # 最低价为 0 表示不设下限
-        self.price_ranges: Dict[str, Tuple[float, float]] = {}
+        self.price_ranges: Dict[str, Dict[str, Tuple[float, float]]] = {}
 
-        # 通用价格区间 (匹配所有未单独设置的 GPU)
-        self.default_price_range: Tuple[float, float] = (0.0, 0.0)
+        # 通用价格区间 (每平台的默认, 匹配所有未单独设置的 GPU)
+        # 结构: {"runpod": (0.0, 0.50), "vast": (0.0, 0.30)}
+        self.default_price_range: Dict[str, Tuple[float, float]] = {}
 
         # Telegram
         self.telegram_bot_token: str = ""
@@ -454,45 +455,70 @@ def interactive_setup(cfg: Config):
     colored_platforms = " ".join(f"{platform_colors[p]}● {p}{C.RESET}" for p in cfg.platforms)
     print(f"\n  {C.GREEN}✔ 已启用:{C.RESET} {colored_platforms}")
 
-    # ════════ Step 2: 价格区间 ════════
+    # ════════ Step 2: 价格区间 (按平台) ════════
     print(ui_section("💰", "Step 2/5 — 价格区间 (美元/小时/每卡)"))
-    ui_hint("输入 GPU 型号 → 最低价 → 最高价, 空行结束")
+    ui_hint("为每个已选平台分别设置 GPU 价格区间")
+    ui_hint("输入 GPU 型号 → 最低价 → 最高价, 空行结束该平台")
     ui_hint("常用: RTX 4090, RTX 5090, A100, H100, L40S, A10, RTX 3090 ...")
     ui_hint(f"输入 {C.B_WHITE}*{C.RESET}{C.DIM} 表示通用区间, 最低价填 0 表示不设下限{C.RESET}")
     print()
 
-    gpu_count_added = 0
-    while True:
-        gpu = ui_input(f"{C.B_WHITE}GPU 型号{C.RESET} (或 * 或空行结束)")
-        if not gpu:
-            break
-        p_min_str = ui_input(f"  {C.GREEN}最低价{C.RESET} ($/hr/卡, 0=不限)")
-        p_max_str = ui_input(f"  {C.RED}最高价{C.RESET} ($/hr/卡)")
-        try:
-            p_min = float(p_min_str) if p_min_str else 0.0
-            p_max = float(p_max_str)
-        except ValueError:
-            ui_warn("价格无效, 跳过")
-            continue
-        if p_max <= 0:
-            ui_warn("最高价必须 > 0, 跳过")
-            continue
-        if p_min > p_max:
-            p_min, p_max = p_max, p_min
-            ui_warn(f"自动修正: 最低={p_min}, 最高={p_max}")
+    # 平台显示名 & 颜色
+    _pname_map = {
+        "runpod": ("RunPod", C.B_BLUE),
+        "primeintellect": ("PrimeIntellect", C.B_GREEN),
+        "vast": ("Vast", C.B_YELLOW),
+        "clore": ("Clore", C.B_RED),
+    }
 
-        lo = format_price(p_min) if p_min > 0 else "$0"
-        hi = format_price(p_max)
+    any_price_set = False
+    for plat in cfg.platforms:
+        pname, pc = _pname_map.get(plat, (plat, C.WHITE))
+        print(f"  {C.DIM}┌{C.RESET} {pc}{C.BOLD}{pname}{C.RESET} {C.DIM}的价格区间{C.RESET}")
 
-        if gpu == "*":
-            cfg.default_price_range = (p_min, p_max)
-            ui_ok(f"通用区间: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{hi}{C.RESET}/hr/卡")
+        cfg.price_ranges[plat] = {}
+        gpu_count_added = 0
+
+        while True:
+            gpu = ui_input(f"{pc}{pname}{C.RESET} — {C.B_WHITE}GPU 型号{C.RESET} (或 * 或空行跳过)")
+            if not gpu:
+                break
+
+            p_min_str = ui_input(f"  {C.GREEN}最低价{C.RESET} ($/hr/卡, 0=不限)")
+            p_max_str = ui_input(f"  {C.RED}最高价{C.RESET} ($/hr/卡)")
+            try:
+                p_min = float(p_min_str) if p_min_str else 0.0
+                p_max = float(p_max_str)
+            except ValueError:
+                ui_warn("价格无效, 跳过")
+                continue
+            if p_max <= 0:
+                ui_warn("最高价必须 > 0, 跳过")
+                continue
+            if p_min > p_max:
+                p_min, p_max = p_max, p_min
+                ui_warn(f"自动修正: 最低={p_min}, 最高={p_max}")
+
+            lo = format_price(p_min) if p_min > 0 else "$0"
+            hi = format_price(p_max)
+
+            if gpu == "*":
+                cfg.default_price_range[plat] = (p_min, p_max)
+                ui_ok(f"{pname} 通用区间: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{hi}{C.RESET}/hr/卡")
+            else:
+                cfg.price_ranges[plat][gpu.lower()] = (p_min, p_max)
+                ui_ok(f"{pname} — {gpu}: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{hi}{C.RESET}/hr/卡")
+            gpu_count_added += 1
+            any_price_set = True
+
+        if gpu_count_added == 0:
+            ui_warn(f"{pname} 未设置价格区间")
         else:
-            cfg.price_ranges[gpu.lower()] = (p_min, p_max)
-            ui_ok(f"{gpu}: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{hi}{C.RESET}/hr/卡")
-        gpu_count_added += 1
+            ui_ok(f"{pname} 共设置 {gpu_count_added} 条价格区间")
+        print(f"  {C.DIM}└{C.RESET}")
+        print()
 
-    if not cfg.price_ranges and cfg.default_price_range[1] <= 0:
+    if not any_price_set:
         print()
         ui_err("至少需要设置一个价格区间!")
         sys.exit(1)
@@ -567,12 +593,18 @@ def interactive_setup(cfg: Config):
     colored_platforms = " ".join(f"{platform_colors[p]}● {p}{C.RESET}" for p in cfg.platforms)
     print(f"  {C.DIM}│{C.RESET} {C.CYAN}平台{C.RESET}        {colored_platforms}")
     print(f"  {C.DIM}│{C.RESET} {C.CYAN}价格区间{C.RESET}")
-    for gpu, (pmin, pmax) in cfg.price_ranges.items():
-        lo = format_price(pmin) if pmin > 0 else "$0"
-        print(f"  {C.DIM}│{C.RESET}   {C.WHITE}{gpu}{C.RESET}: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{format_price(pmax)}{C.RESET}/hr/卡")
-    if cfg.default_price_range[1] > 0:
-        lo = format_price(cfg.default_price_range[0]) if cfg.default_price_range[0] > 0 else "$0"
-        print(f"  {C.DIM}│{C.RESET}   {C.WHITE}* 通用{C.RESET}: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{format_price(cfg.default_price_range[1])}{C.RESET}/hr/卡")
+    for plat in cfg.platforms:
+        pname, pc = _pname_map.get(plat, (plat, C.WHITE))
+        plat_ranges = cfg.price_ranges.get(plat, {})
+        plat_default = cfg.default_price_range.get(plat)
+        if plat_ranges or plat_default:
+            print(f"  {C.DIM}│{C.RESET}   {pc}{pname}{C.RESET}:")
+            for gpu, (pmin, pmax) in plat_ranges.items():
+                lo = format_price(pmin) if pmin > 0 else "$0"
+                print(f"  {C.DIM}│{C.RESET}     {C.WHITE}{gpu}{C.RESET}: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{format_price(pmax)}{C.RESET}/hr/卡")
+            if plat_default and plat_default[1] > 0:
+                lo = format_price(plat_default[0]) if plat_default[0] > 0 else "$0"
+                print(f"  {C.DIM}│{C.RESET}     {C.WHITE}* 通用{C.RESET}: {C.GREEN}{lo}{C.RESET} ~ {C.RED}{format_price(plat_default[1])}{C.RESET}/hr/卡")
 
     print(f"  {C.DIM}│{C.RESET} {C.CYAN}GPU 数量{C.RESET}    {C.WHITE}{cfg.gpu_count_min}x ~ {cfg.gpu_count_max}x{C.RESET}")
     img_short = cfg.docker_image.split("/")[-1] if "/" in cfg.docker_image else cfg.docker_image
@@ -605,13 +637,14 @@ def _gen_password(length: int = 16) -> str:
 # 价格匹配逻辑
 # ============================================================
 
-def match_price(cfg: Config, gpu_name: str, price_per_gpu: float, gpu_count: int) -> bool:
+def match_price(cfg: Config, platform: str, gpu_name: str, price_per_gpu: float, gpu_count: int) -> bool:
     """
-    判断该 offer 是否满足价格区间
+    判断该 offer 是否满足价格区间 (按平台查找)
+    platform: 平台标识 (如 "runpod", "vast")
     gpu_name: GPU 型号名称 (如 "NVIDIA GeForce RTX 4090")
     price_per_gpu: 每卡每小时价格
     gpu_count: 卡数
-    返回 True 当价格落在 [min_price, max_price] 区间内
+    返回 True 当价格落在该平台的 [min_price, max_price] 区间内
     """
     if gpu_count < cfg.gpu_count_min or gpu_count > cfg.gpu_count_max:
         return False
@@ -620,17 +653,18 @@ def match_price(cfg: Config, gpu_name: str, price_per_gpu: float, gpu_count: int
     gpu_lower = gpu_name.lower()
     short_names = _extract_gpu_short_name(gpu_lower)
 
-    # 先查精确匹配
+    # 先查该平台精确匹配
+    plat_ranges = cfg.price_ranges.get(platform, {})
     price_range = None
     for sn in short_names:
-        if sn in cfg.price_ranges:
-            price_range = cfg.price_ranges[sn]
+        if sn in plat_ranges:
+            price_range = plat_ranges[sn]
             break
 
-    # 再查通用区间
+    # 再查该平台的通用区间
     if price_range is None:
-        dr = cfg.default_price_range
-        if dr[1] > 0:
+        dr = cfg.default_price_range.get(platform)
+        if dr and dr[1] > 0:
             price_range = dr
 
     if price_range is None:
@@ -797,7 +831,7 @@ def _scan_runpod_once(cfg: Config, headers: Dict, results: List):
                 }
                 results.append(offer)
 
-                matched = match_price(cfg, gpu_type, price_per_gpu, gpu_count)
+                matched = match_price(cfg, "runpod", gpu_type, price_per_gpu, gpu_count)
                 log(
                     f"[RunPod] {gpu_type} x{gpu_count} = "
                     f"{format_price(total_price)}/hr ({format_price(price_per_gpu)}/卡) "
@@ -926,7 +960,7 @@ def _scan_prime_once(cfg: Config, headers: Dict, results: List):
             }
             results.append(offer)
 
-            matched = match_price(cfg, gpu_name, best_price, gpu_count)
+            matched = match_price(cfg, "primeintellect", gpu_name, best_price, gpu_count)
             log(
                 f"[PrimeIntellect] {gpu_name} x{gpu_count} = "
                 f"{format_price(total_price)}/hr ({format_price(best_price)}/卡, {price_type}) "
@@ -1064,7 +1098,7 @@ def _scan_vast_once(cfg: Config, headers: Dict, results: List):
         }
         results.append(result)
 
-        matched = match_price(cfg, gpu_name, price_per_gpu, gpu_count)
+        matched = match_price(cfg, "vast", gpu_name, price_per_gpu, gpu_count)
         if matched:
             log(
                 f"[Vast] {gpu_name} x{gpu_count} = "
@@ -1214,7 +1248,7 @@ def _scan_clore_once(cfg: Config, results: List):
         }
         results.append(result)
 
-        matched = match_price(cfg, gpu_name, price_per_gpu, gpu_count)
+        matched = match_price(cfg, "clore", gpu_name, price_per_gpu, gpu_count)
         if matched:
             log(
                 f"[Clore] {gpu_name} x{gpu_count} = "
@@ -1316,6 +1350,13 @@ def display_results(cfg: Config, results: List):
         "Vast": C.B_YELLOW,
         "Clore": C.B_RED,
     }
+    # 平台显示名 → 内部 ID
+    _plat_id = {
+        "RunPod": "runpod",
+        "PrimeIntellect": "primeintellect",
+        "Vast": "vast",
+        "Clore": "clore",
+    }
 
     # 列宽定义 (显示宽度)
     COL_P = 16   # 平台
@@ -1331,7 +1372,7 @@ def display_results(cfg: Config, results: List):
         print(f"\n  {C.DIM}{sp} 扫描中, 等待结果...{C.RESET}\n")
         return
 
-    matched_count = sum(1 for r in results_sorted if match_price(cfg, r["gpu_name"], r["price_per_gpu"], r["gpu_count"]))
+    matched_count = sum(1 for r in results_sorted if match_price(cfg, _plat_id.get(r["platform"], ""), r["gpu_name"], r["price_per_gpu"], r["gpu_count"]))
 
     bdr = C.DIM
     r = C.RESET
@@ -1364,7 +1405,7 @@ def display_results(cfg: Config, results: List):
                 gpu_name = gpu_name[:-1]
             gpu_name += ".."
 
-        matched = match_price(cfg, item["gpu_name"], price_per_gpu, gpu_count)
+        matched = match_price(cfg, _plat_id.get(platform, ""), item["gpu_name"], price_per_gpu, gpu_count)
         pc = pcolors.get(platform, C.WHITE)
 
         if matched:
@@ -1489,7 +1530,21 @@ def config_from_args(args) -> Config:
     cfg.vast_key = args.vast_key or os.environ.get("VAST_API_KEY", "")
     cfg.clore_key = args.clore_key or os.environ.get("CLORE_API_KEY", "")
 
-    # 价格区间 (从命令行参数构建)
+    # 平台过滤 (先确定平台, 再分配价格)
+    if args.only:
+        cfg.platforms = [p.strip().lower() for p in args.only.split(",")]
+    else:
+        cfg.platforms = []
+        if cfg.runpod_key:
+            cfg.platforms.append("runpod")
+        if cfg.prime_key:
+            cfg.platforms.append("primeintellect")
+        if cfg.vast_key:
+            cfg.platforms.append("vast")
+        if cfg.clore_key:
+            cfg.platforms.append("clore")
+
+    # 价格区间 (从命令行参数构建 — CLI 模式价格应用到所有已选平台)
     _price_map = {
         "rtx 4090": (args.price_4090_min, args.price_4090),
         "4090":     (args.price_4090_min, args.price_4090),
@@ -1501,12 +1556,14 @@ def config_from_args(args) -> Config:
         "h100":     (args.price_h100_min, args.price_h100),
         "l40s":     (args.price_l40s_min, args.price_l40s),
     }
-    for gpu_key, (pmin, pmax) in _price_map.items():
-        if pmax > 0:
-            cfg.price_ranges[gpu_key] = (pmin, pmax)
+    for plat in cfg.platforms:
+        cfg.price_ranges[plat] = {}
+        for gpu_key, (pmin, pmax) in _price_map.items():
+            if pmax > 0:
+                cfg.price_ranges[plat][gpu_key] = (pmin, pmax)
 
-    if args.price_default > 0:
-        cfg.default_price_range = (args.price_default_min, args.price_default)
+        if args.price_default > 0:
+            cfg.default_price_range[plat] = (args.price_default_min, args.price_default)
 
     # 扫描设置
     cfg.interval = args.interval
@@ -1520,20 +1577,6 @@ def config_from_args(args) -> Config:
     # Telegram
     cfg.telegram_bot_token = args.telegram_bot_token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
     cfg.telegram_chat_id = args.telegram_chat_id or os.environ.get("TELEGRAM_CHAT_ID", "")
-
-    # 平台过滤
-    if args.only:
-        cfg.platforms = [p.strip().lower() for p in args.only.split(",")]
-    else:
-        cfg.platforms = []
-        if cfg.runpod_key:
-            cfg.platforms.append("runpod")
-        if cfg.prime_key:
-            cfg.platforms.append("primeintellect")
-        if cfg.vast_key:
-            cfg.platforms.append("vast")
-        if cfg.clore_key:
-            cfg.platforms.append("clore")
 
     return cfg
 
@@ -1552,7 +1595,9 @@ def main():
             print("[ERROR] 至少需要一个平台的 API Key!")
             parser.print_help()
             sys.exit(1)
-        if not cfg.price_ranges and cfg.default_price_range[1] <= 0:
+        # 检查是否有任何价格区间
+        has_prices = any(cfg.price_ranges.get(p) for p in cfg.platforms) or any(cfg.default_price_range.get(p) for p in cfg.platforms)
+        if not has_prices:
             print("[ERROR] 至少需要设置一个价格区间!")
             parser.print_help()
             sys.exit(1)
@@ -1561,20 +1606,28 @@ def main():
         interactive_setup(cfg)
 
     print(BANNER)
+    # 平台名称映射
+    _pn = {"runpod": "RunPod", "primeintellect": "PrimeIntellect", "vast": "Vast", "clore": "Clore"}
     # 彩色平台列表
     _pc = {"runpod": C.B_BLUE, "primeintellect": C.B_GREEN, "vast": C.B_YELLOW, "clore": C.B_RED}
     colored = " ".join(f"{_pc.get(p, C.WHITE)}● {p}{C.RESET}" for p in cfg.platforms)
     log(f"已启用: {colored}")
 
-    # 显示价格区间
-    range_parts = []
-    for gpu, (pmin, pmax) in cfg.price_ranges.items():
-        lo = format_price(pmin) if pmin > 0 else "$0"
-        range_parts.append(f"{C.WHITE}{gpu}{C.RESET} {C.GREEN}{lo}{C.RESET}~{C.RED}{format_price(pmax)}{C.RESET}")
-    if cfg.default_price_range[1] > 0:
-        lo = format_price(cfg.default_price_range[0]) if cfg.default_price_range[0] > 0 else "$0"
-        range_parts.append(f"{C.WHITE}*通用{C.RESET} {C.GREEN}{lo}{C.RESET}~{C.RED}{format_price(cfg.default_price_range[1])}{C.RESET}")
-    log(f"价格区间: {' | '.join(range_parts) if range_parts else '未设置'}")
+    # 显示价格区间 (按平台)
+    for plat in cfg.platforms:
+        pname = _pn.get(plat, plat)
+        pc = _pc.get(plat, C.WHITE)
+        plat_ranges = cfg.price_ranges.get(plat, {})
+        plat_default = cfg.default_price_range.get(plat)
+        parts = []
+        for gpu, (pmin, pmax) in plat_ranges.items():
+            lo = format_price(pmin) if pmin > 0 else "$0"
+            parts.append(f"{C.WHITE}{gpu}{C.RESET} {C.GREEN}{lo}{C.RESET}~{C.RED}{format_price(pmax)}{C.RESET}")
+        if plat_default and plat_default[1] > 0:
+            lo = format_price(plat_default[0]) if plat_default[0] > 0 else "$0"
+            parts.append(f"{C.WHITE}*通用{C.RESET} {C.GREEN}{lo}{C.RESET}~{C.RED}{format_price(plat_default[1])}{C.RESET}")
+        if parts:
+            log(f"{pc}{pname}{C.RESET} 价格: {' | '.join(parts)}")
     log(f"扫描间隔: {C.WHITE}{cfg.interval}s{C.RESET} | GPU: {C.WHITE}{cfg.gpu_count_min}x~{cfg.gpu_count_max}x{C.RESET}")
     if cfg.dry_run:
         log("Dry-Run 模式: 只查询不下单", "DRY")
