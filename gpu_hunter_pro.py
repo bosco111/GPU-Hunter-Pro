@@ -220,8 +220,8 @@ CLORE_API_BASE    = "https://api.clore.ai/v1"
 DEFAULT_INTERVAL  = 30
 # 默认容器镜像
 DEFAULT_IMAGE     = "pytorch/pytorch:2.12.1-cuda12.6-cudnn9-devel"
-# 默认 Vast 模板 hash_id (Ubuntu 22.04 VM)
-DEFAULT_VAST_TEMPLATE_HASH = "9dccf1205f16962f373ad1ea262ba004"
+# 默认 Vast 模板 hash_id (cuda-12.9.1-auto)
+DEFAULT_VAST_TEMPLATE_HASH = "8ab860114bddc24c4cb43af37aacfa15"
 # 默认磁盘大小 (GB)
 DEFAULT_DISK      = 50
 # 默认 SSH 端口
