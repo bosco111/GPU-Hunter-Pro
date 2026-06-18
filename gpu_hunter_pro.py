@@ -1039,37 +1039,50 @@ def scan_vast(cfg: Config, results: List, stop_event: threading.Event):
 def _scan_vast_once(cfg: Config, headers: Dict, results: List):
     """Vast 单次扫描"""
     # Vast 搜索 API: POST /bundles/
-    query = {
-        "gpu_name": {"in": []},  # 空列表 = 不过滤, 获取所有 GPU
-        "rentable": {"eq": True},
-        "rented": {"eq": False},
-        "type": {"eq": "on-demand"},
-        "order": [["dph_total", "asc"]],
-    }
+    # 按已知 GPU 型号逐个查询, 合并结果
+    vast_gpu_names = [
+        "RTX 4090", "RTX 5090", "RTX 3090", "RTX 3080", "RTX 3070",
+        "A100-SXM4-80GB", "A100-SXM4-40GB", "A100-PCIE-80GB", "A100",
+        "H100", "H100 80GB HBM3", "H200",
+        "L40S", "L40", "L4",
+        "A10", "A40", "T4", "V100",
+        "RTX A6000", "RTX A5000", "RTX A4000",
+        "B200", "GB200",
+    ]
 
-    status, resp = http_request(
-        f"{VAST_API_BASE}/bundles/",
-        "POST",
-        headers=headers,
-        data=query,
-        timeout=20,
-    )
+    all_offers = []
+    for gpu in vast_gpu_names:
+        query = {
+            "gpu_name": {"in": [gpu]},
+            "rentable": {"eq": True},
+            "type": {"eq": "on-demand"},
+        }
 
-    if status == 401:
-        log("[Vast] API Key 无效!", "ERROR")
-        return
-    if status != 200:
-        log(f"[Vast] 查询失败: HTTP {status}", "WARN")
-        return
+        status, resp = http_request(
+            f"{VAST_API_BASE}/bundles/",
+            "POST",
+            headers=headers,
+            data=query,
+            timeout=20,
+        )
 
-    offers_raw = resp.get("offers", [])
-    if not isinstance(offers_raw, list):
-        offers_raw = []
+        if status == 401:
+            log("[Vast] API Key 无效!", "ERROR")
+            return
+        if status != 200:
+            continue  # 该型号无结果, 跳过
 
-    log(f"[Vast] 获取到 {len(offers_raw)} 条 offer")
+        offers_raw = resp.get("offers", [])
+        if isinstance(offers_raw, list):
+            all_offers.extend(offers_raw)
+
+        # 避免限流
+        time.sleep(0.2)
+
+    log(f"[Vast] 共获取到 {len(all_offers)} 条 offer")
 
     matched_count = 0
-    for offer in offers_raw:
+    for offer in all_offers:
         if not isinstance(offer, dict):
             continue
 
@@ -1118,7 +1131,7 @@ def _scan_vast_once(cfg: Config, headers: Dict, results: List):
                         _notify_booking(cfg, result, offer)
 
     if matched_count == 0:
-        log(f"[Vast] {len(offers_raw)} 条 offer 均不在价格区间内")
+        log(f"[Vast] {len(all_offers)} 条 offer 均不在价格区间内")
 
 
 def _book_vast(cfg: Config, headers: Dict, offer_id: str, offer: Dict) -> bool:
