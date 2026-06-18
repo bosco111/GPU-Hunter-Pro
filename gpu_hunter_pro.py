@@ -820,23 +820,24 @@ def _scan_runpod_once(cfg: Config, headers: Dict, results: List):
                 price_per_gpu = total_price / gpu_count if gpu_count > 0 else total_price
                 offer_id = resp.get("id", f"runpod-{gpu_type}-{gpu_count}")
 
-                offer = {
-                    "platform": "RunPod",
-                    "gpu_name": gpu_type,
-                    "gpu_count": gpu_count,
-                    "price_total": total_price,
-                    "price_per_gpu": price_per_gpu,
-                    "offer_id": offer_id,
-                    "raw": resp,
-                }
-                results.append(offer)
-
                 matched = match_price(cfg, "runpod", gpu_type, price_per_gpu, gpu_count)
-                log(
-                    f"[RunPod] {gpu_type} x{gpu_count} = "
-                    f"{format_price(total_price)}/hr ({format_price(price_per_gpu)}/卡) "
-                    f"{'✓ 匹配' if matched else '✗'}"
-                )
+
+                if matched:
+                    offer = {
+                        "platform": "RunPod",
+                        "gpu_name": gpu_type,
+                        "gpu_count": gpu_count,
+                        "price_total": total_price,
+                        "price_per_gpu": price_per_gpu,
+                        "offer_id": offer_id,
+                        "raw": resp,
+                    }
+                    results.append(offer)
+
+                    log(
+                        f"[RunPod] {gpu_type} x{gpu_count} = "
+                        f"{format_price(total_price)}/hr ({format_price(price_per_gpu)}/卡) ✓"
+                    )
 
                 if matched and not cfg.dry_run and not is_booked(cfg, "runpod", offer_id):
                     # Pod 已经创建成功了 (POST 就是创建)
@@ -948,34 +949,35 @@ def _scan_prime_once(cfg: Config, headers: Dict, results: List):
             total_price = best_price * gpu_count
             offer_id = f"prime-{gpu_name}-{gpu_count}-{price_type}"
 
-            offer = {
-                "platform": "PrimeIntellect",
-                "gpu_name": gpu_name,
-                "gpu_count": gpu_count,
-                "price_total": total_price,
-                "price_per_gpu": best_price,
-                "price_type": price_type,
-                "offer_id": offer_id,
-                "raw": info,
-            }
-            results.append(offer)
-
             matched = match_price(cfg, "primeintellect", gpu_name, best_price, gpu_count)
-            log(
-                f"[PrimeIntellect] {gpu_name} x{gpu_count} = "
-                f"{format_price(total_price)}/hr ({format_price(best_price)}/卡, {price_type}) "
-                f"{'✓ 匹配' if matched else '✗'}"
-            )
 
-            if matched and not is_booked(cfg, "primeintellect", offer_id):
-                if cfg.dry_run:
-                    log(f"[PrimeIntellect] [Dry-Run] 匹配但不自动下单", "DRY")
-                else:
-                    # 尝试创建实例
-                    booked = _book_primeintellect(cfg, headers, gpu_name, gpu_count, info)
-                    if booked:
-                        mark_booked(cfg, "primeintellect", offer_id)
-                        _notify_booking(cfg, offer, {})
+            if matched:
+                offer = {
+                    "platform": "PrimeIntellect",
+                    "gpu_name": gpu_name,
+                    "gpu_count": gpu_count,
+                    "price_total": total_price,
+                    "price_per_gpu": best_price,
+                    "price_type": price_type,
+                    "offer_id": offer_id,
+                    "raw": info,
+                }
+                results.append(offer)
+
+                log(
+                    f"[PrimeIntellect] {gpu_name} x{gpu_count} = "
+                    f"{format_price(total_price)}/hr ({format_price(best_price)}/卡, {price_type}) ✓"
+                )
+
+                if not is_booked(cfg, "primeintellect", offer_id):
+                    if cfg.dry_run:
+                        log(f"[PrimeIntellect] [Dry-Run] 匹配但不自动下单", "DRY")
+                    else:
+                        # 尝试创建实例
+                        booked = _book_primeintellect(cfg, headers, gpu_name, gpu_count, info)
+                        if booked:
+                            mark_booked(cfg, "primeintellect", offer_id)
+                            _notify_booking(cfg, offer, {})
 
 
 def _book_primeintellect(cfg: Config, headers: Dict, gpu_name: str, gpu_count: int, gpu_info: Dict) -> bool:
@@ -1066,6 +1068,7 @@ def _scan_vast_once(cfg: Config, headers: Dict, results: List):
 
     log(f"[Vast] 获取到 {len(offers_raw)} 条 offer")
 
+    matched_count = 0
     for offer in offers_raw:
         if not isinstance(offer, dict):
             continue
@@ -1086,19 +1089,20 @@ def _scan_vast_once(cfg: Config, headers: Dict, results: List):
 
         price_per_gpu = total_price / gpu_count if gpu_count > 0 else total_price
 
-        result = {
-            "platform": "Vast",
-            "gpu_name": gpu_name,
-            "gpu_count": gpu_count,
-            "price_total": total_price,
-            "price_per_gpu": price_per_gpu,
-            "offer_id": offer_id,
-            "raw": offer,
-        }
-        results.append(result)
-
         matched = match_price(cfg, "vast", gpu_name, price_per_gpu, gpu_count)
         if matched:
+            matched_count += 1
+            result = {
+                "platform": "Vast",
+                "gpu_name": gpu_name,
+                "gpu_count": gpu_count,
+                "price_total": total_price,
+                "price_per_gpu": price_per_gpu,
+                "offer_id": offer_id,
+                "raw": offer,
+            }
+            results.append(result)
+
             log(
                 f"[Vast] {gpu_name} x{gpu_count} = "
                 f"{format_price(total_price)}/hr ({format_price(price_per_gpu)}/卡) ✓"
@@ -1112,6 +1116,9 @@ def _scan_vast_once(cfg: Config, headers: Dict, results: List):
                     if booked:
                         mark_booked(cfg, "vast", offer_id)
                         _notify_booking(cfg, result, offer)
+
+    if matched_count == 0:
+        log(f"[Vast] {len(offers_raw)} 条 offer 均不在价格区间内")
 
 
 def _book_vast(cfg: Config, headers: Dict, offer_id: str, offer: Dict) -> bool:
@@ -1236,19 +1243,19 @@ def _scan_clore_once(cfg: Config, results: List):
         if is_rented:
             continue
 
-        result = {
-            "platform": "Clore",
-            "gpu_name": gpu_name,
-            "gpu_count": gpu_count,
-            "price_total": total_price,
-            "price_per_gpu": price_per_gpu,
-            "offer_id": server_id,
-            "raw": server,
-        }
-        results.append(result)
-
         matched = match_price(cfg, "clore", gpu_name, price_per_gpu, gpu_count)
         if matched:
+            result = {
+                "platform": "Clore",
+                "gpu_name": gpu_name,
+                "gpu_count": gpu_count,
+                "price_total": total_price,
+                "price_per_gpu": price_per_gpu,
+                "offer_id": server_id,
+                "raw": server,
+            }
+            results.append(result)
+
             log(
                 f"[Clore] {gpu_name} x{gpu_count} = "
                 f"{format_price(total_price)}/hr ({format_price(price_per_gpu)}/卡) ✓"
