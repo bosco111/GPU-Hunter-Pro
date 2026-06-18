@@ -220,8 +220,8 @@ CLORE_API_BASE    = "https://api.clore.ai/v1"
 DEFAULT_INTERVAL  = 30
 # 默认容器镜像
 DEFAULT_IMAGE     = "pytorch/pytorch:2.12.1-cuda12.6-cudnn9-devel"
-# 默认 Vast 模板 hash_id (官方示例模板)
-DEFAULT_VAST_TEMPLATE_HASH = "4e17788f74f075dd9aab7d0d4427968f"
+# 默认 Vast 模板 hash_id (Ubuntu 22.04 VM)
+DEFAULT_VAST_TEMPLATE_HASH = "9dccf1205f16962f373ad1ea262ba004"
 # 默认磁盘大小 (GB)
 DEFAULT_DISK      = 50
 # 默认 SSH 端口
@@ -1179,6 +1179,8 @@ def _book_vast(cfg: Config, headers: Dict, offer_id: str, offer: Dict) -> bool:
     if cfg.ssh_password:
         payload["env"]["JUPYTER_PWD"] = cfg.ssh_password
 
+    log(f"[Vast] 创建请求: offer={offer_id}, payload={json.dumps(payload, indent=2)[:300]}")
+
     status, resp = http_request(
         f"{VAST_API_BASE}/asks/{offer_id}/",
         "PUT",
@@ -1191,7 +1193,8 @@ def _book_vast(cfg: Config, headers: Dict, offer_id: str, offer: Dict) -> bool:
         log(f"[Vast] 预订成功: offer {offer_id}", "SUCCESS")
         return True
     else:
-        log(f"[Vast] 预订失败: HTTP {status} — {resp}", "WARN")
+        log(f"[Vast] 预订失败: HTTP {status}", "ERROR")
+        log(f"[Vast] 响应详情: {json.dumps(resp, ensure_ascii=False)[:500]}", "ERROR")
         return False
 
 
