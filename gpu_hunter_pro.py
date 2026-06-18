@@ -1036,18 +1036,17 @@ def scan_vast(cfg: Config, results: List, stop_event: threading.Event):
 
 def _scan_vast_once(cfg: Config, headers: Dict, results: List):
     """Vast 单次扫描"""
-    # Vast 搜索 API: POST /search/asks/
+    # Vast 搜索 API: POST /bundles/
     query = {
-        "q": {
-            "rentable": {"eq": True},
-            "rented": {"eq": False},
-            "type": {"eq": "on-demand"},
-        },
+        "gpu_name": {"in": []},  # 空列表 = 不过滤, 获取所有 GPU
+        "rentable": {"eq": True},
+        "rented": {"eq": False},
+        "type": {"eq": "on-demand"},
         "order": [["dph_total", "asc"]],
     }
 
     status, resp = http_request(
-        f"{VAST_API_BASE}/search/asks/",
+        f"{VAST_API_BASE}/bundles/",
         "POST",
         headers=headers,
         data=query,
