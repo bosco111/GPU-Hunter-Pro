@@ -1055,7 +1055,6 @@ def _scan_vast_once(cfg: Config, headers: Dict, results: List):
         query = {
             "gpu_name": {"in": [gpu]},
             "rentable": {"eq": True},
-            "type": {"eq": "on-demand"},
         }
 
         status, resp = http_request(
