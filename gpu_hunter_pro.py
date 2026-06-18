@@ -220,8 +220,8 @@ CLORE_API_BASE    = "https://api.clore.ai/v1"
 DEFAULT_INTERVAL  = 30
 # 默认容器镜像
 DEFAULT_IMAGE     = "pytorch/pytorch:2.12.1-cuda12.6-cudnn9-devel"
-# 默认 Vast 模板 (cuda-12.9.1-auto)
-DEFAULT_VAST_TEMPLATE = "cuda-12.9.1-auto"
+# 默认 Vast 模板 hash_id (官方示例模板)
+DEFAULT_VAST_TEMPLATE_HASH = "4e17788f74f075dd9aab7d0d4427968f"
 # 默认磁盘大小 (GB)
 DEFAULT_DISK      = 50
 # 默认 SSH 端口
@@ -349,7 +349,7 @@ class Config:
         self.docker_image: str = DEFAULT_IMAGE
         self.disk_size: int = DEFAULT_DISK
         self.ssh_password: str = ""
-        self.vast_template: str = DEFAULT_VAST_TEMPLATE
+        self.vast_template: str = DEFAULT_VAST_TEMPLATE_HASH
 
         # 运行模式
         self.dry_run: bool = False
@@ -537,39 +537,23 @@ def interactive_setup(cfg: Config):
 
     # Vast 模板选择 (仅当选择了 Vast 时显示)
     if "vast" in cfg.platforms:
-        vast_templates = [
-            "cuda-12.9.1-auto",
-            "cuda-12.8.1-auto",
-            "cuda-12.7.1-auto",
-            "cuda-12.6.1-auto",
-            "cuda-12.5.1-auto",
-            "cuda-12.4.1-auto",
-            "cuda-12.3.1-auto",
-            "ubuntu_cli_22.04-2025-11-21",
-            "ubuntu_desktop_22.04-2025-11-21",
-            "ubuntu_desktop_24.04-2025-11-24",
-        ]
-        print(f"\n  {C.DIM}│{C.RESET} {C.B_YELLOW}Vast 模板{C.RESET} {C.DIM}(推荐用模板, 比 Docker 镜像更稳定){C.RESET}")
-        for i, t in enumerate(vast_templates, 1):
-            marker = " ← 默认" if t == DEFAULT_VAST_TEMPLATE else ""
-            print(f"  {C.DIM}│{C.RESET}  {C.B_WHITE}{i:2d}.{C.RESET} {t}{C.GREEN}{marker}{C.RESET}")
-        print(f"  {C.DIM}│{C.RESET}  {C.B_WHITE} 0.{C.RESET} {C.DIM}使用 Docker 镜像 (不用模板){C.RESET}")
+        print(f"\n  {C.DIM}│{C.RESET} {C.B_YELLOW}Vast 模板设置{C.RESET}")
+        ui_hint("Vast 推荐使用 template_hash_id 创建实例 (更稳定)")
+        ui_hint("可在 Vast 控制台模板页面复制 hash_id")
+        ui_hint(f"默认模板 hash: {DEFAULT_VAST_TEMPLATE_HASH}")
+        ui_hint("留空使用默认模板, 输入 0 不使用模板 (改用 Docker 镜像)")
         print()
 
-        tpl_sel = ui_input("选择 Vast 模板编号", "1")
-        if tpl_sel:
-            try:
-                tpl_idx = int(tpl_sel)
-                if tpl_idx == 0:
-                    cfg.vast_template = ""
-                    ui_ok("将使用 Docker 镜像 (非模板)")
-                elif 1 <= tpl_idx <= len(vast_templates):
-                    cfg.vast_template = vast_templates[tpl_idx - 1]
-                    ui_ok(f"Vast 模板: {C.B_YELLOW}{cfg.vast_template}{C.RESET}")
-                else:
-                    ui_warn(f"无效编号, 使用默认模板: {DEFAULT_VAST_TEMPLATE}")
-            except ValueError:
-                ui_warn("无效输入, 使用默认模板")
+        tpl_input = ui_input("Vast template_hash_id", DEFAULT_VAST_TEMPLATE_HASH)
+        if tpl_input == "0":
+            cfg.vast_template = ""
+            ui_ok("将使用 Docker 镜像 (非模板)")
+        elif tpl_input:
+            cfg.vast_template = tpl_input
+            ui_ok(f"Vast 模板: {C.B_YELLOW}{cfg.vast_template}{C.RESET}")
+        else:
+            cfg.vast_template = DEFAULT_VAST_TEMPLATE_HASH
+            ui_ok(f"使用默认模板: {C.B_YELLOW}{DEFAULT_VAST_TEMPLATE_HASH}{C.RESET}")
         print()
 
     disk = ui_input("磁盘大小 (GB)", str(DEFAULT_DISK))
@@ -1185,7 +1169,7 @@ def _book_vast(cfg: Config, headers: Dict, offer_id: str, offer: Dict) -> bool:
 
     # 优先使用 Vast 模板, 否则用 Docker 镜像
     if cfg.vast_template:
-        payload["template_id"] = cfg.vast_template
+        payload["template_hash_id"] = cfg.vast_template
         log(f"[Vast] 使用模板: {cfg.vast_template}")
     else:
         payload["image"] = cfg.docker_image
