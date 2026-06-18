@@ -218,10 +218,10 @@ CLORE_API_BASE    = "https://api.clore.ai/v1"
 
 # 默认扫描间隔 (秒)
 DEFAULT_INTERVAL  = 30
-# 默认容器镜像 (NVIDIA 官方 CUDA + Ubuntu, 兼容所有 Vast 机器)
+# 默认容器镜像 (备用, 当不用模板时使用)
 DEFAULT_IMAGE     = "nvidia/cuda:12.1.1-devel-ubuntu22.04"
-# 默认 Vast 模板 hash_id (空 = 不使用模板, 直接用 Docker 镜像)
-DEFAULT_VAST_TEMPLATE_HASH = ""
+# 默认 Vast 模板 hash_id (cuda-12.9.1-auto, Vast 必须用模板)
+DEFAULT_VAST_TEMPLATE_HASH = "8ab860114bddc24c4cb43af37aacfa15"
 # 默认磁盘大小 (GB)
 DEFAULT_DISK      = 50
 # 默认 SSH 端口
@@ -537,19 +537,19 @@ def interactive_setup(cfg: Config):
 
     # Vast 模板选择 (仅当选择了 Vast 时显示)
     if "vast" in cfg.platforms:
-        print(f"\n  {C.DIM}│{C.RESET} {C.B_YELLOW}Vast 部署方式{C.RESET}")
-        ui_hint("默认使用 Docker 镜像 (nvidia/cuda), 兼容所有 Vast 机器")
-        ui_hint("也可输入 Vast 模板 hash_id (从控制台复制)")
-        ui_hint("留空 = 用 Docker 镜像, 粘贴 hash = 用模板")
+        print(f"\n  {C.DIM}│{C.RESET} {C.B_YELLOW}Vast 模板设置{C.RESET}")
+        ui_hint("Vast 必须使用模板, 默认 cuda-12.9.1-auto")
+        ui_hint("也可粘贴其他模板 hash_id (从控制台复制)")
+        ui_hint(f"默认: {DEFAULT_VAST_TEMPLATE_HASH}")
         print()
 
-        tpl_input = ui_input("Vast template_hash_id (留空用镜像)", DEFAULT_VAST_TEMPLATE_HASH or "不用模板")
-        if tpl_input and tpl_input != "不用模板":
+        tpl_input = ui_input("Vast template_hash_id", DEFAULT_VAST_TEMPLATE_HASH)
+        if tpl_input:
             cfg.vast_template = tpl_input
             ui_ok(f"Vast 模板: {C.B_YELLOW}{cfg.vast_template}{C.RESET}")
         else:
-            cfg.vast_template = ""
-            ui_ok(f"使用 Docker 镜像: {C.B_CYAN}{cfg.docker_image}{C.RESET}")
+            cfg.vast_template = DEFAULT_VAST_TEMPLATE_HASH
+            ui_ok(f"使用默认: {C.B_YELLOW}{DEFAULT_VAST_TEMPLATE_HASH}{C.RESET}")
         print()
 
     disk = ui_input("磁盘大小 (GB)", str(DEFAULT_DISK))
